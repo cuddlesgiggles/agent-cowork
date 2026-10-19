@@ -48,16 +48,5 @@ cat ~/.codely/ide-settings.json     # defaultChatModelTitle 应当已经变成�
 然后在 Cowork 里发一句话，回话应当来自那个模型。若它回的是别的模型，说明那个名字在 Cowork 的清单里
 没有对应条目——再跑一次 `node seed.mjs`。
 
-## 验到哪一步
-
-真机验证过：装上插件后 `magpie cowork minimax-design/MiniMax-M3` 与切回
-`workbuddy/deepseek-v4.1-flash` 都按预期改写了 `~/.codely/ide-settings.json`，`magpie ls`
-认出 Cowork 并显示正确模型；`seed.mjs` 在本机把 121 条的清单补到 144 条，数组类型保持、
-无重复 `model` 字符串、其余顶层字段原样保留。
-
-**没验的**：Cowork 重启后按 `defaultChatModelTitle` 命中 magpie 条目的那一跳（要真的开一次 Cowork 发一句话）。
-另外描述符里没有填 `ua`：Cowork 的 User-Agent 串我还没取到，所以网关日志里它的调用仍记成
-`agent=local`，用量页不会单列成 Cowork。这两条谁验证到了欢迎提 issue 或 PR。
-
 图标取自 Cowork 安装包里的 `app/resource/dist/branding/logo_dark.png`，缩到 112px 后内联成 data URI
 （和 `@magpie-community/agent-kimi-desktop` 一样的做法，好处是不依赖仓库先建好），同图另存一份 `icon.png` 随包发。
