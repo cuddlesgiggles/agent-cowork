@@ -46,6 +46,18 @@ const MUTATIONS = [
     why: "reads the next flag as --gateway's value, so it fetches --check/v1/models",
   },
   {
+    file: "seed.mjs",
+    from: "customModels: models.filter((m) => !(m && m.providerId === PROVIDER_ID)),",
+    to: "customModels: models.slice(),",
+    why: "--remove leaves every magpie model in Cowork's picker",
+  },
+  {
+    file: "seed.mjs",
+    from: "return existsSync(storePath) && !existsSync(bakPath)",
+    to: "return existsSync(storePath)",
+    why: "a second run overwrites the original store with an already-seeded one",
+  },
+  {
     file: "cowork.agent.js",
     from: "icon: \"data:image/png;base64,",
     to: "icon: \"data:image/jpeg;base64,",

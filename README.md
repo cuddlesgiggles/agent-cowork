@@ -13,8 +13,7 @@ magpie cowork default                            # 把 Cowork 交还给它自己
 装：
 
 ```sh
-magpie plugin add ./agent-cowork                       # 本地目录
-magpie plugin add github:cuddlesgiggles/agent-cowork   # 发布之后
+magpie plugin add @magpie-community/agent-cowork
 ```
 
 ## 先跑一次 seed
@@ -27,13 +26,19 @@ magpie 的写入器碰到 `customModels: []` 会写成 `{"0": {…}}`，Cowork �
 
 ```sh
 cd agent-cowork
-node seed.mjs            # 写之前把旧文件留成 settings.json.pre-magpie
+node seed.mjs            # 第一次写之前把原文件留成 settings.json.pre-magpie，只留这一次
 node seed.mjs --check    # 只报漂移，不写；有漂移时退出码 1
+node seed.mjs --remove   # 撤掉 magpie 那家 provider 和所有 magpie: 条目，你自己加的不动
 ```
 
 它只做加法：已经在清单里的模型（不管挂在谁名下）不重复加，magpie 已经不再提供的 `magpie:` 条目会被
 摘掉，你自己在 Cowork 里加的条目一概不动。搬完之后，`magpie cowork <模型>` 就能直接切，
 不用回 Cowork 的模型列表里点。
+
+**这一步得你手动跑，而且目录变了要再跑**：agent 插件按契约只能写 Cowork 的一个配置文件，模型清单在
+另一个文件里、还是数组，插件搬不了。magpie 的目录本身会变（我这台机器上它从 167 条变成过 144 条），
+所以 `--check` 留了个能用退出码判断的口子——有漂移退 1，挂个定时任务就行。**没搬进去的模型不会报错**：
+在 Cowork 里选了它，它会退回自己原来的模型。这是这条路线最难看的一点，目前只能靠"选之前先 `--check`"避开。
 
 改动生效的时机：Cowork 启动时读这个文件，所以重启 Cowork 或新开一个会话才用新模型。
 
