@@ -17,9 +17,9 @@ const MUTATIONS = [
   },
   {
     file: "seed.mjs",
-    from: ".filter((m) => !(m && m.providerId === PROVIDER_ID && !ids.has(m.model)))",
-    to: ".filter(() => true)",
-    why: "leaves a magpie model that magpie no longer offers in the picker",
+    from: "const pruned = models.filter((m) => m && seeded.has(m.id) && !ids.has(m.model)).map((m) => m.id)",
+    to: "const pruned = models.filter((m) => m && m.providerId === PROVIDER_ID && !ids.has(m.model)).map((m) => m.id)",
+    why: "prunes by provider again, which is how a model the user added under magpie gets eaten",
   },
   {
     file: "seed.mjs",
@@ -47,8 +47,8 @@ const MUTATIONS = [
   },
   {
     file: "seed.mjs",
-    from: "customModels: models.filter((m) => !(m && m.providerId === PROVIDER_ID)),",
-    to: "customModels: models.slice(),",
+    from: "const left = models.filter((m) => !(m && seeded.has(m.id)))",
+    to: "const left = models.slice()",
     why: "--remove leaves every magpie model in Cowork's picker",
   },
   {

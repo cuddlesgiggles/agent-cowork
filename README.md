@@ -33,9 +33,10 @@ node seed.mjs --check    # 只报漂移，不写；有漂移时退出码 1
 node seed.mjs --remove   # 撤掉 magpie 那家 provider 和所有 magpie: 条目，你自己加的不动
 ```
 
-它只做加法：已经在清单里的模型（不管挂在谁名下）不重复加，magpie 已经不再提供的 `magpie:` 条目会被
-摘掉，你自己在 Cowork 里加的条目一概不动。搬完之后，`magpie cowork <模型>` 就能直接切，
-不用回 Cowork 的模型列表里点。
+它只做加法：已经在清单里的模型（不管挂在谁名下）不重复加，magpie 已经不再提供的条目会被
+摘掉，你自己在 Cowork 里加的条目一概不动——哪些是它加的记在旁边的 `settings.json.magpie-seeded` 里，
+删和摘都只按这份记录来，不按"挂在 magpie 名下"猜（你可以在 Cowork 里往这个 provider 下自己加模型）。
+搬完之后，`magpie cowork <模型>` 就能直接切，不用回 Cowork 的模型列表里点。
 
 **这一步得你手动跑，而且目录变了要再跑**：agent 插件按契约只能写 Cowork 的一个配置文件，模型清单在
 另一个文件里、还是数组，插件搬不了。magpie 的目录本身会变（我这台机器上它从 167 条变成过 144 条），
