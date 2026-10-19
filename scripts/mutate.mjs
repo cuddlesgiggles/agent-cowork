@@ -17,8 +17,8 @@ const MUTATIONS = [
   },
   {
     file: "seed.mjs",
-    from: "const kept = models.filter((m) => !(m && m.providerId === PROVIDER_ID && !live.has(m.model)))",
-    to: "const kept = models.slice()",
+    from: ".filter((m) => !(m && m.providerId === PROVIDER_ID && !ids.has(m.model)))",
+    to: ".filter(() => true)",
     why: "leaves a magpie model that magpie no longer offers in the picker",
   },
   {
@@ -56,6 +56,18 @@ const MUTATIONS = [
     from: "return existsSync(storePath) && !existsSync(bakPath)",
     to: "return existsSync(storePath)",
     why: "a second run overwrites the original store with an already-seeded one",
+  },
+  {
+    file: "seed.mjs",
+    from: "if (!oursToLabel(m, ids, byId, baseUrl) || m.displayName === m.model) return m",
+    to: "return m",
+    why: "leaves a pretty label as the picker title, so the string magpie writes matches nothing",
+  },
+  {
+    file: "seed.mjs",
+    from: "displayName: m.id,",
+    to: "displayName: m.magpie_label || m.id,",
+    why: "same, for the entries the package adds itself",
   },
   {
     file: "cowork.agent.js",

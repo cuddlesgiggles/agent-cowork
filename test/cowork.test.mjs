@@ -40,7 +40,7 @@ test("a catalog model becomes the shape Cowork's own store uses", () => {
     id: `${PROVIDER_ID}:group/auto-glm-5-3-flash`,
     model: "group/auto-glm-5-3-flash",
     providerId: PROVIDER_ID,
-    displayName: "GLM-5.3-Flash · routing group",
+    displayName: "group/auto-glm-5-3-flash",
     authType: "openai",
     roles: ["model"],
     wireApi: "chat",
@@ -48,7 +48,7 @@ test("a catalog model becomes the shape Cowork's own store uses", () => {
     supportsMultimodal: true,
   })
   assert.equal(entry(TEXT).supportsMultimodal, false)
-  assert.equal(entry(TEXT).displayName, "DeepSeek V4.1 Flash")
+  assert.equal(entry(GLM).displayName, entry(GLM).model, "the picker title is the one string magpie can write")
 })
 
 test("the store keeps its own models and gets one entry per new catalog model", () => {
@@ -75,6 +75,33 @@ test("a model Cowork already has is not added twice, by any provider", () => {
   const { next, added } = plan(store, [GLM], V1)
   assert.deepEqual(added, [])
   assert.equal(next.customModels.length, 1)
+})
+
+test("an entry already pointed at magpie is relabelled to its model id", () => {
+  const store = {
+    customModelProviders: [{ id: "custom-provider", name: "magpie", baseUrl: V1 }],
+    customModels: [{ id: `custom-provider:${GLM.id}`, model: GLM.id, providerId: "custom-provider", displayName: "GLM-5.3-Flash · routing group" }],
+  }
+  const { next, added, relabeled, changed } = plan(store, [GLM], V1)
+  assert.deepEqual(added, [], "no duplicate entry for a model Cowork can already reach")
+  assert.equal(relabeled, 1)
+  assert.equal(changed, true)
+  assert.equal(next.customModels[0].displayName, GLM.id)
+  assert.equal(next.customModels[0].id, `custom-provider:${GLM.id}`, "its id stays, sessions may name it")
+  const again = plan(next, [GLM], V1)
+  assert.equal(again.relabeled, 0)
+  assert.equal(again.changed, false)
+})
+
+test("a model the user wired to their own endpoint keeps its own name", () => {
+  const store = {
+    customModelProviders: [{ id: "custom-provider", baseUrl: "https://their.own.test/v1" }],
+    customModels: [{ id: `custom-provider:${GLM.id}`, model: GLM.id, providerId: "custom-provider", displayName: "mine" }],
+  }
+  const { next, relabeled, changed } = plan(store, [GLM], V1)
+  assert.equal(relabeled, 0)
+  assert.equal(changed, true, "magpie's own provider is still missing")
+  assert.equal(next.customModels[0].displayName, "mine")
 })
 
 test("a magpie model magpie no longer offers is dropped, and nothing else moves", () => {

@@ -19,9 +19,11 @@ magpie plugin add @magpie-community/agent-cowork
 ## 先跑一次 seed
 
 Cowork 的模型清单在 `~/.codely/settings.json`，它当前用哪个模型记在 `~/.codely/ide-settings.json`
-的 `defaultChatModelTitle`（值就是模型字符串，也是它写进请求体 `model` 的那个字符串）。
-这个插件只维护后一个文件——magpie 的 agent 插件按契约只能碰一个配置文件，而前一个文件里是数组，
-magpie 的写入器碰到 `customModels: []` 会写成 `{"0": {…}}`，Cowork 读不了。
+的 `defaultChatModelTitle`。这个值是清单里那条模型的**名字**（`displayName`），不是请求体里的 `model`
+字符串——所以 `seed.mjs` 把它搬进去的每条模型都用模型 id 当名字（清单里名字和 id 不一致的那些，
+它也会顺手改成 id，否则 `magpie cowork <模型>` 写进去的字符串 Cowork 认不出来，会静默退回原来的模型）。
+插件本身只维护 `ide-settings.json` 这一个文件——magpie 的 agent 插件按契约只能碰一个配置文件，
+而清单那个文件里是数组，magpie 的写入器碰到 `customModels: []` 会写成 `{"0": {…}}`，Cowork 读不了。
 所以模型清单由包里的 `seed.mjs` 从 magpie 的 `/v1/models` 一次性搬过去：
 
 ```sh

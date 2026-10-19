@@ -44,7 +44,10 @@ export function entry(m) {
     id: `${PROVIDER_ID}:${m.id}`,
     model: m.id,
     providerId: PROVIDER_ID,
-    displayName: m.magpie_label || m.display_name || m.id,
+    // Cowork's picker shows this and stores it as the session's model title, and
+    // the title is the one string magpie's agent plugin can write — so it has to
+    // be the model id, not a prettier label, or the switch lands on nothing.
+    displayName: m.id,
     authType: "openai",
     roles: ["model"],
     wireApi: "chat",
@@ -53,14 +56,30 @@ export function entry(m) {
   }
 }
 
+// An entry is ours to label when it names a model magpie offers and its provider
+// points at magpie's own address. That covers the pool this package seeds and
+// what an earlier version of it seeded, and nothing the user wired up themselves.
+function oursToLabel(m, ids, byId, baseUrl) {
+  return !!m && ids.has(m.model) && byId.get(m.providerId) === baseUrl
+}
+
 // store: Cowork's settings.json object. catalog: magpie's /v1/models data.
 // Returns the next store plus what moved, without touching the input.
 export function plan(store, catalog, baseUrl) {
   const models = Array.isArray(store.customModels) ? store.customModels : []
+  const providers = Array.isArray(store.customModelProviders) ? store.customModelProviders.slice() : []
+  const byId = new Map(providers.map((p) => [p && p.id, p && p.baseUrl]))
+  const ids = new Set(catalog.map((m) => m.id))
   const taken = new Set(models.map((m) => m && m.model))
-  const live = new Set(catalog.map((m) => m.id))
 
-  const kept = models.filter((m) => !(m && m.providerId === PROVIDER_ID && !live.has(m.model)))
+  let relabeled = 0
+  const kept = models
+    .filter((m) => !(m && m.providerId === PROVIDER_ID && !ids.has(m.model)))
+    .map((m) => {
+      if (!oursToLabel(m, ids, byId, baseUrl) || m.displayName === m.model) return m
+      relabeled++
+      return { ...m, displayName: m.model }
+    })
   const added = []
   for (const m of catalog) {
     if (taken.has(m.id)) continue
@@ -68,15 +87,14 @@ export function plan(store, catalog, baseUrl) {
     kept.push(entry(m))
   }
 
-  const providers = Array.isArray(store.customModelProviders) ? store.customModelProviders.slice() : []
   const at = providers.findIndex((p) => p && p.id === PROVIDER_ID)
   if (at === -1) providers.push(provider(baseUrl))
   else providers[at] = provider(baseUrl)
 
-  const pruned = models.filter((m) => m && m.providerId === PROVIDER_ID && !live.has(m.model)).map((m) => m.model)
-  const changed = added.length > 0 || pruned.length > 0 || at === -1 ||
+  const pruned = models.filter((m) => m && m.providerId === PROVIDER_ID && !ids.has(m.model)).map((m) => m.model)
+  const changed = added.length > 0 || pruned.length > 0 || relabeled > 0 || at === -1 ||
     (at !== -1 && store.customModelProviders[at].baseUrl !== baseUrl)
-  return { next: { ...store, customModels: kept, customModelProviders: providers }, added, pruned, changed }
+  return { next: { ...store, customModels: kept, customModelProviders: providers }, added, pruned, relabeled, changed }
 }
 
 // The other way: take everything this package put in, and only that.
@@ -158,10 +176,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }
 
   const store = readStore()
-  const { next, added, pruned, changed } = plan(store, catalog, `${gateway}/v1`)
+  const { next, added, pruned, relabeled, changed } = plan(store, catalog, `${gateway}/v1`)
 
   if (flag("check")) {
-    if (changed) console.log(`drift: +${added.length} to add, -${pruned.length} to drop (${[...added, ...pruned].slice(0, 6).join(", ")})`)
+    if (changed) console.log(`drift: +${added.length} to add, -${pruned.length} to drop, ~${relabeled} to relabel (${[...added, ...pruned].slice(0, 6).join(", ")})`)
     else console.log(`in step: ${catalog.length} catalog models, ${next.customModels.length} in Cowork, nothing to write`)
     process.exit(changed ? 1 : 0)
   }
@@ -171,5 +189,5 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }
 
   writeStore(next)
-  console.log(`wrote ${storePath}: +${added.length} magpie models, -${pruned.length} stale, ${next.customModels.length} total`)
+  console.log(`wrote ${storePath}: +${added.length} magpie models, -${pruned.length} stale, ~${relabeled} relabelled, ${next.customModels.length} total`)
 }
