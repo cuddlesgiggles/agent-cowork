@@ -48,13 +48,7 @@ cat ~/.codely/ide-settings.json     # defaultChatModelTitle 应当已经变成�
 然后在 Cowork 里发一句话，回话应当来自那个模型。若它回的是别的模型，说明那个名字在 Cowork 的清单里
 没有对应条目——再跑一次 `node seed.mjs`。
 
-## 测的东西
-
-`npm test`（10 条，`node --test`）覆盖描述符里的落点字段、图标（PNG data URI，且 `package.json` 的
-`magpie.icon` 与 `agent.icon` 是同一个值）、目录条目到 Cowork 条目形状的映射
-（`context_length` → `contextLength`、`modalities.input` 含 `image` → `supportsMultimodal`）、
-去重、摘掉失效条目、保留别人的条目、二次运行零改动、`plan()` 不改动传入对象、命令行参数解析。
-`npm run mutate`（8 处变异）逐个把实现改坏，要求每次都把测试跑红，全红才算有护栏。
+## 验到哪一步
 
 真机验证过：装上插件后 `magpie cowork minimax-design/MiniMax-M3` 与切回
 `workbuddy/deepseek-v4.1-flash` 都按预期改写了 `~/.codely/ide-settings.json`，`magpie ls`
