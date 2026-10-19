@@ -8,7 +8,7 @@
 // their own model under that provider in Cowork and nothing entitles us to prune it.
 import { readFileSync, writeFileSync, existsSync, copyFileSync, renameSync } from "node:fs"
 import { homedir } from "node:os"
-import { join } from "node:path"
+import { join, dirname } from "node:path"
 import { pathToFileURL } from "node:url"
 
 export const PROVIDER_ID = "magpie"
@@ -75,42 +75,49 @@ export function loadSeeded(path) {
   }
 }
 
-// A store seeded before the sidecar existed — by an older version of this script
-// or by hand — is adopted once: every entry that reaches magpie's address counts
-// as ours to manage, so --remove can still clean up after a version that wrote
-// them under another provider's id.
-export function adoptSeeded(store, baseUrl) {
+// A store written by an older version of this script, before the record existed,
+// is adopted once — and only entries under our own provider, whose model magpie
+// still offers. A provider that merely happens to point at magpie's address can
+// be the user's own, and nothing here entitles us to claim it.
+export function adoptSeeded(store, catalog = null) {
   const models = Array.isArray(store.customModels) ? store.customModels : []
-  const providers = Array.isArray(store.customModelProviders) ? store.customModelProviders : []
-  const atMagpie = new Map(providers.map((p) => [p && p.id, p && p.baseUrl]))
+  const ids = catalog === null ? null : new Set(catalog.map((m) => m.id))
   return new Set(models
-    .filter((m) => m && (m.providerId === PROVIDER_ID || atMagpie.get(m.providerId) === baseUrl))
+    .filter((m) => m && m.providerId === PROVIDER_ID && (ids === null || ids.has(m.model)))
     .map((m) => m.id))
 }
 
-// An entry is ours to relabel when it names a model magpie offers and its provider
-// points at magpie's address. That reaches entries seeded before this package knew
-// the naming rule, without touching a model the user wired somewhere else.
-function oursToLabel(m, ids, byId, baseUrl) {
-  return !!m && ids.has(m.model) && byId.get(m.providerId) === baseUrl
-}
-
 // store: Cowork's settings.json object. catalog: magpie's /v1/models data.
-// seeded: the entry ids this package wrote. Nothing passed in is mutated.
-export function plan(store, catalog, baseUrl, seeded = new Set()) {
+// seeded: the entry ids this package wrote, from the record. opts.selected is the
+// model Cowork is on right now, opts.prune allows a shrinking catalog to remove
+// recorded entries. Nothing passed in is mutated.
+export function plan(store, catalog, baseUrl, seeded = new Set(), opts = {}) {
   const models = Array.isArray(store.customModels) ? store.customModels : []
   const providers = Array.isArray(store.customModelProviders) ? store.customModelProviders.slice() : []
-  const byId = new Map(providers.map((p) => [p && p.id, p && p.baseUrl]))
   const ids = new Set(catalog.map((m) => m.id))
   const taken = new Set(models.map((m) => m && m.model))
+  const selected = opts.selected ?? null
 
-  const pruned = models.filter((m) => m && seeded.has(m.id) && !ids.has(m.model)).map((m) => m.id)
+  // A catalog smaller than what we recorded is more often magpie starting up or
+  // an account resting than a real retirement, and pruning then deletes the model
+  // the user is talking to. Hold unless they say --prune.
+  const shrank = catalog.length < seeded.size
+  const droppable = models.filter((m) => m && seeded.has(m.id) && !ids.has(m.model) &&
+    m.id !== selected && m.model !== selected && m.displayName !== selected)
+  const pruned = shrank && !opts.prune ? [] : droppable.map((m) => m.id)
+  const held = shrank ? droppable.map((m) => m.id).filter((id) => !pruned.includes(id)) : []
+
   let relabeled = 0
+  let renamed = null
+  const dropped = new Set(pruned)
   const kept = models
-    .filter((m) => !(m && pruned.includes(m.id)))
+    .filter((m) => !(m && dropped.has(m.id)))
     .map((m) => {
-      if (!oursToLabel(m, ids, byId, baseUrl) || m.displayName === m.model) return m
+      // only entries we wrote, and only ones we recorded: a name the user chose in
+      // Cowork is theirs, and renaming it would leave their selection pointing nowhere
+      if (!m || !seeded.has(m.id) || m.displayName === m.model) return m
       relabeled++
+      if (m.displayName === selected) renamed = m.model
       return { ...m, displayName: m.model }
     })
   const added = []
@@ -130,7 +137,7 @@ export function plan(store, catalog, baseUrl, seeded = new Set()) {
     (at !== -1 && store.customModelProviders[at].baseUrl !== baseUrl)
   return {
     next: { ...store, customModels: kept, customModelProviders: providers },
-    added, pruned, relabeled, seeded: [...nextSeeded], changed,
+    added, pruned, held, relabeled, renamed, seeded: [...nextSeeded], changed,
   }
 }
 
@@ -156,13 +163,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const argv = process.argv.slice(2)
   const flag = (n) => argv.includes(`--${n}`)
   if (flag("help")) {
-    console.log("usage: node seed.mjs [--gateway http://127.0.0.1:3425] [--store ~/.codely/settings.json] [--check | --remove]")
+    console.log("usage: node seed.mjs [--gateway http://127.0.0.1:3425] [--store ~/.codely/settings.json] [--check | --remove | --prune]")
     process.exit(0)
   }
 
   const gateway = opt(argv, "gateway", "http://127.0.0.1:3425").replace(/\/$/, "")
   const storePath = expand(opt(argv, "store", "~/.codely/settings.json"))
   const listPath = seedFile(storePath)
+  const bakPath = `${storePath}.pre-magpie`
+  const titlePath = join(dirname(storePath), "ide-settings.json")
 
   const readStore = () => {
     if (!existsSync(storePath)) return {}
@@ -170,7 +179,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     try {
       store = JSON.parse(readFileSync(storePath, "utf8"))
     } catch {
-      console.error(`${storePath} isn't readable JSON — Cowork may be writing it right now; try again, or restore ${storePath}.pre-magpie`)
+      console.error(`${storePath} isn't readable JSON — Cowork may be writing it right now; try again, or restore ${bakPath}`)
       process.exit(2)
     }
     if (!Array.isArray(store.customModels) && "customModels" in store) {
@@ -179,18 +188,39 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     }
     return store
   }
+  const writeList = (ids) => {
+    writeFileSync(`${listPath}.tmp`, `${JSON.stringify(ids, null, 1)}\n`, "utf8")
+    renameSync(`${listPath}.tmp`, listPath)
+  }
   const writeStore = (next, seeded) => {
-    const bak = `${storePath}.pre-magpie`
-    if (backupNeeded(storePath, bak)) {
-      copyFileSync(storePath, bak)
-      console.log(`the store as it was before magpie touched it: ${bak}`)
+    if (backupNeeded(storePath, bakPath)) {
+      copyFileSync(storePath, bakPath)
+      console.log(`the store as it was before magpie touched it: ${bakPath}`)
     }
     // Cowork writes this file too, so land each new one in a single move
     writeFileSync(`${storePath}.tmp`, `${JSON.stringify(next, null, 2)}\n`, "utf8")
     renameSync(`${storePath}.tmp`, storePath)
-    // an empty record is kept: "nothing of ours" and "no record, guess from the
-    // provider" are different answers, and only the first one is safe to act on
+    // an empty record is kept: "nothing of ours" and "no record, guess" are
+    // different answers, and only the first one is safe to act on
     writeList(seeded)
+  }
+  const readTitle = () => {
+    try {
+      return JSON.parse(readFileSync(titlePath, "utf8")).defaultChatModelTitle ?? null
+    } catch {
+      return null
+    }
+  }
+  const writeTitle = (t) => {
+    let ide = {}
+    try {
+      ide = JSON.parse(readFileSync(titlePath, "utf8"))
+    } catch {
+      return console.error(`${titlePath} isn't readable JSON; leaving Cowork's selection alone — re-pick it once in Cowork`)
+    }
+    ide.defaultChatModelTitle = t
+    writeFileSync(`${titlePath}.tmp`, `${JSON.stringify(ide, null, 2)}\n`, "utf8")
+    renameSync(`${titlePath}.tmp`, titlePath)
   }
 
   const store = readStore()
@@ -199,16 +229,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     console.error(`${listPath} isn't readable JSON; refusing to guess which entries magpie wrote`)
     process.exit(2)
   }
+  // No record: adopt only where there is evidence this script wrote the store.
   let adopted = false
-  if (seeded === null) {
-    seeded = adoptSeeded(store, `${gateway}/v1`)
+  if (seeded === null && existsSync(bakPath)) {
+    seeded = adoptSeeded(store)
     adopted = true
-    if (seeded.size) console.log(`no ${listPath} yet: taking the ${seeded.size} entries that reach magpie as the ones magpie wrote`)
+    if (seeded.size) console.log(`no ${listPath}: adopting the ${seeded.size} entries under "${PROVIDER_ID}"`)
   }
-  const writeList = (ids) => {
-    writeFileSync(`${listPath}.tmp`, `${JSON.stringify(ids, null, 1)}\n`, "utf8")
-    renameSync(`${listPath}.tmp`, listPath)
-  }
+  if (seeded === null) seeded = new Set()
 
   if (flag("remove")) {
     const { next, removed, leftBehind, changed } = unplan(store, seeded)
@@ -236,20 +264,30 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     console.error("magpie's catalog is empty")
     process.exit(2)
   }
+  if (adopted) seeded = new Set([...seeded].filter((id) => catalog.some((m) => `${PROVIDER_ID}:${m.id}` === id)))
 
-  const { next, added, pruned, relabeled, seeded: nextSeeded, changed } = plan(store, catalog, `${gateway}/v1`, seeded)
+  const selected = readTitle()
+  const { next, added, pruned, held, relabeled, renamed, seeded: nextSeeded, changed } =
+    plan(store, catalog, `${gateway}/v1`, seeded, { prune: flag("prune"), selected })
 
   if (flag("check")) {
     if (changed) console.log(`drift: +${added.length} to add, -${pruned.length} to drop, ~${relabeled} to relabel`)
     else console.log(`in step: ${catalog.length} catalog models, ${next.customModels.length} in Cowork, nothing to write`)
+    if (held.length) console.log(`held ${held.length} recorded entries back: the catalog is shorter than the last run, pass --prune to drop them`)
     process.exit(changed ? 1 : 0)
   }
   if (!changed) {
     console.log(`in step: nothing to write (${next.customModels.length} models in Cowork)`)
     if (adopted) writeList(nextSeeded)
+    if (held.length) console.log(`held ${held.length} recorded entries back: the catalog is shorter than the last run, pass --prune to drop them`)
     process.exit(0)
   }
 
   writeStore(next, nextSeeded)
+  if (renamed) {
+    writeTitle(renamed)
+    console.log(`Cowork was on the entry we just renamed; its selection now says ${renamed}`)
+  }
   console.log(`wrote ${storePath}: +${added.length} magpie models, -${pruned.length} stale, ~${relabeled} relabelled, ${next.customModels.length} total`)
+  if (held.length) console.log(`held ${held.length} recorded entries back: the catalog is shorter than the last run, pass --prune to drop them`)
 }

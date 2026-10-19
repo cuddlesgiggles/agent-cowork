@@ -77,20 +77,41 @@ test("a model Cowork already has is not added twice, by any provider", () => {
   assert.equal(next.customModels.length, 1)
 })
 
-test("an entry already pointed at magpie is relabelled to its model id", () => {
+test("an entry this package wrote is relabelled to its model id", () => {
   const store = {
     customModelProviders: [{ id: "custom-provider", name: "magpie", baseUrl: V1 }],
     customModels: [{ id: `custom-provider:${GLM.id}`, model: GLM.id, providerId: "custom-provider", displayName: "GLM-5.3-Flash · routing group" }],
   }
-  const { next, added, relabeled, changed } = plan(store, [GLM], V1)
+  const seeded = new Set([`custom-provider:${GLM.id}`])
+  const { next, added, relabeled, changed } = plan(store, [GLM], V1, seeded)
   assert.deepEqual(added, [], "no duplicate entry for a model Cowork can already reach")
   assert.equal(relabeled, 1)
   assert.equal(changed, true)
   assert.equal(next.customModels[0].displayName, GLM.id)
   assert.equal(next.customModels[0].id, `custom-provider:${GLM.id}`, "its id stays, sessions may name it")
-  const again = plan(next, [GLM], V1)
+  const again = plan(next, [GLM], V1, seeded)
   assert.equal(again.relabeled, 0)
   assert.equal(again.changed, false)
+})
+
+test("an entry the user named themselves is never renamed, and magpie's write follows it", () => {
+  const store = {
+    customModelProviders: [{ id: "custom-provider", baseUrl: V1 }],
+    customModels: [{ id: `custom-provider:${GLM.id}`, model: GLM.id, providerId: "custom-provider", displayName: "My Two" }],
+  }
+  const { next, relabeled, renamed } = plan(store, [GLM], V1, new Set(), { selected: "My Two" })
+  assert.equal(relabeled, 0)
+  assert.equal(renamed, null)
+  assert.equal(next.customModels[0].displayName, "My Two")
+})
+
+test("renaming the entry Cowork is on moves the selection with it", () => {
+  const store = {
+    customModelProviders: [{ id: PROVIDER_ID, baseUrl: V1, name: "magpie", apiKey: "magpie-cowork", authType: "openai" }],
+    customModels: [{ id: `${PROVIDER_ID}:${GLM.id}`, model: GLM.id, providerId: PROVIDER_ID, displayName: "GLM-5.3-Flash · routing group" }],
+  }
+  const { renamed } = plan(store, [GLM], V1, new Set([`${PROVIDER_ID}:${GLM.id}`]), { selected: "GLM-5.3-Flash · routing group" })
+  assert.equal(renamed, GLM.id)
 })
 
 test("a model the user wired to their own endpoint keeps its own name", () => {
@@ -104,7 +125,7 @@ test("a model the user wired to their own endpoint keeps its own name", () => {
   assert.equal(next.customModels[0].displayName, "mine")
 })
 
-test("a magpie model magpie no longer offers is dropped, and nothing else moves", () => {
+test("a recorded model magpie no longer offers is dropped with --prune, and nothing else moves", () => {
   const store = {
     customModelProviders: [{ id: PROVIDER_ID, name: "magpie", baseUrl: V1, apiKey: "magpie-cowork", authType: "openai" }],
     customModels: [
@@ -114,11 +135,42 @@ test("a magpie model magpie no longer offers is dropped, and nothing else moves"
     ],
   }
   const seeded = new Set([`${PROVIDER_ID}:gone`, `${PROVIDER_ID}:${TEXT.id}`])
-  const { next, added, pruned } = plan(store, [TEXT], V1, seeded)
+  const { next, added, pruned } = plan(store, [TEXT], V1, seeded, { prune: true })
   assert.deepEqual(pruned, [`${PROVIDER_ID}:gone`])
   assert.deepEqual(added, [])
   assert.deepEqual(next.customModels.map((m) => m.id), ["custom-provider:mine", `${PROVIDER_ID}:${TEXT.id}`])
-  assert.deepEqual(seeded.has(`${PROVIDER_ID}:gone`), true, "the set handed in is not edited")
+  assert.equal(seeded.has(`${PROVIDER_ID}:gone`), true, "the set handed in is not edited")
+})
+
+test("a catalog shorter than the record holds its pruning until --prune", () => {
+  const store = {
+    customModelProviders: [{ id: PROVIDER_ID, baseUrl: V1, name: "magpie", apiKey: "magpie-cowork", authType: "openai" }],
+    customModels: [
+      { id: `${PROVIDER_ID}:gone`, model: "gone", providerId: PROVIDER_ID, displayName: "gone" },
+      { id: `${PROVIDER_ID}:${TEXT.id}`, model: TEXT.id, providerId: PROVIDER_ID, displayName: TEXT.id },
+    ],
+  }
+  const seeded = new Set([`${PROVIDER_ID}:gone`, `${PROVIDER_ID}:${TEXT.id}`])
+  const held = plan(store, [TEXT], V1, seeded)
+  assert.deepEqual(held.pruned, [], "an account resting or magpie still starting must not empty the picker")
+  assert.deepEqual(held.held, [`${PROVIDER_ID}:gone`])
+  assert.equal(held.changed, false)
+  const dropped = plan(store, [TEXT], V1, seeded, { prune: true })
+  assert.deepEqual(dropped.pruned, [`${PROVIDER_ID}:gone`])
+})
+
+test("the model Cowork is on is never pruned, even with --prune", () => {
+  const store = {
+    customModelProviders: [{ id: PROVIDER_ID, baseUrl: V1, name: "magpie", apiKey: "magpie-cowork", authType: "openai" }],
+    customModels: [
+      { id: `${PROVIDER_ID}:gone`, model: "gone", providerId: PROVIDER_ID, displayName: "gone" },
+      { id: `${PROVIDER_ID}:${TEXT.id}`, model: TEXT.id, providerId: PROVIDER_ID, displayName: TEXT.id },
+    ],
+  }
+  const seeded = new Set([`${PROVIDER_ID}:gone`])
+  const { pruned, next } = plan(store, [TEXT], V1, seeded, { prune: true, selected: "gone" })
+  assert.deepEqual(pruned, [])
+  assert.ok(next.customModels.some((m) => m.id === `${PROVIDER_ID}:gone`), "deleting it would drop the live session silently")
 })
 
 test("a model the user added under magpie's own provider survives a shorter catalog", () => {
@@ -128,7 +180,7 @@ test("a model the user added under magpie's own provider survives a shorter cata
     customModels: [own, { id: `${PROVIDER_ID}:${TEXT.id}`, model: TEXT.id, providerId: PROVIDER_ID, displayName: TEXT.id }],
   }
   const seeded = new Set([`${PROVIDER_ID}:${TEXT.id}`])
-  const { next, pruned, changed } = plan(store, [], V1, seeded)
+  const { next, pruned, changed } = plan(store, [], V1, seeded, { prune: true })
   assert.deepEqual(pruned, [`${PROVIDER_ID}:${TEXT.id}`], "what we wrote and magpie dropped")
   assert.ok(next.customModels.some((m) => m.id === "magpie:my-own"), "what they added under it stays")
   assert.equal(changed, true)
@@ -236,29 +288,72 @@ test("--remove takes out what the sidecar recorded and nothing the user added", 
   }
 })
 
-test("a store seeded before the sidecar existed is still taken back", () => {
+test("a store this script wrote before the record existed is still taken back", () => {
   const dir = mkdtempSync(join(tmpdir(), "cowork-adopt-"))
   try {
     const store = join(dir, "settings.json")
     writeFileSync(store, JSON.stringify(plan(OWN_STORE, [GLM, TEXT], V1).next))
+    writeFileSync(`${store}.pre-magpie`, "{}")
     const r = spawnSync(process.execPath, [SEED, "--remove", "--store", store], { encoding: "utf8" })
     assert.equal(r.status, 0, r.stderr)
-    assert.match(r.stdout, /no .*magpie-seeded yet: taking the 2 entries/)
+    assert.match(r.stdout, /no .*magpie-seeded: adopting the 2 entries/)
     assert.deepEqual(JSON.parse(readFileSync(store, "utf8")).customModels.map((m) => m.id), ["custom-provider:mine"])
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
-test("with no record yet, an entry is adopted only when it reaches magpie", () => {
+test("with no record and no backup, a store we never wrote is left alone", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cowork-noadopt-"))
+  try {
+    const store = join(dir, "settings.json")
+    writeFileSync(store, JSON.stringify({
+      customModelProviders: [{ id: PROVIDER_ID, name: "my-magpie", baseUrl: V1, apiKey: "k", authType: "openai" }],
+      customModels: [
+        { id: "magpie:a/two", model: "a/two", providerId: PROVIDER_ID, displayName: "My Two" },
+        { id: "magpie:my-local", model: "my-local", providerId: PROVIDER_ID, displayName: "My Local" },
+      ],
+    }))
+    const r = spawnSync(process.execPath, [SEED, "--remove", "--store", store], { encoding: "utf8" })
+    assert.equal(r.status, 0, r.stderr)
+    assert.match(r.stdout, /nothing of magpie's to remove/)
+    assert.equal(JSON.parse(readFileSync(store, "utf8")).customModels.length, 2)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("a user provider pointed at magpie's address is never touched, seeded or pruned", () => {
   const store = {
-    customModelProviders: [{ id: "custom-provider", baseUrl: V1 }, { id: "mine", baseUrl: "https://their.own.test/v1" }],
+    customModelProviders: [{ id: "my-magpie", name: "my-magpie", baseUrl: V1, apiKey: "k", authType: "openai" }],
     customModels: [
-      { id: "custom-provider:a", model: "a", providerId: "custom-provider" },
-      { id: "mine:b", model: "b", providerId: "mine" },
+      { id: "my-magpie:a/two", model: "a/two", providerId: "my-magpie", displayName: "My Two" },
+      { id: "my-magpie:my-local", model: "my-local", providerId: "my-magpie", displayName: "My Local" },
     ],
   }
-  assert.deepEqual([...adoptSeeded(store, V1)], ["custom-provider:a"], "their own endpoint is not ours to adopt")
+  const first = plan(store, [{ id: "a/two" }, { id: "a/three" }], V1, new Set(), { selected: "My Two" })
+  assert.deepEqual(first.pruned, [])
+  assert.equal(first.relabeled, 0, "their names are theirs")
+  assert.deepEqual(first.next.customModels.slice(0, 2).map((m) => m.displayName), ["My Two", "My Local"])
+  assert.deepEqual(first.added, ["a/three"], "only the model missing from the store is appended, under our provider")
+  const short = plan(first.next, [{ id: "a/one" }], V1, new Set(first.seeded), { selected: "My Two", prune: true })
+  assert.deepEqual(short.pruned, [`${PROVIDER_ID}:a/three`], "what we wrote and magpie dropped, and nothing of theirs")
+  assert.deepEqual(short.next.customModels.map((m) => m.id).sort(),
+    [`${PROVIDER_ID}:a/one`, "my-magpie:a/two", "my-magpie:my-local"], "a/one is the new seed, their two are untouched")
+})
+
+test("adoption claims our own provider only, never a provider that merely points at magpie", () => {
+  const store = {
+    customModelProviders: [{ id: "my-magpie", baseUrl: V1 }, { id: PROVIDER_ID, baseUrl: V1 }],
+    customModels: [
+      { id: "my-magpie:a/two", model: "a/two", providerId: "my-magpie" },
+      { id: "my-magpie:my-local", model: "my-local", providerId: "my-magpie" },
+      { id: `${PROVIDER_ID}:a/two`, model: "a/two", providerId: PROVIDER_ID },
+      { id: `${PROVIDER_ID}:retired`, model: "retired", providerId: PROVIDER_ID },
+    ],
+  }
+  assert.deepEqual([...adoptSeeded(store)], ["magpie:a/two", "magpie:retired"])
+  assert.deepEqual([...adoptSeeded(store, [{ id: "a/two" }])], ["magpie:a/two"], "and only models magpie still offers")
 })
 
 test("an unreadable record stops instead of guessing", () => {

@@ -17,9 +17,33 @@ const MUTATIONS = [
   },
   {
     file: "seed.mjs",
-    from: "const pruned = models.filter((m) => m && seeded.has(m.id) && !ids.has(m.model)).map((m) => m.id)",
-    to: "const pruned = models.filter((m) => m && m.providerId === PROVIDER_ID && !ids.has(m.model)).map((m) => m.id)",
+    from: "const droppable = models.filter((m) => m && seeded.has(m.id) && !ids.has(m.model) &&",
+    to: "const droppable = models.filter((m) => m && m.providerId === PROVIDER_ID && !ids.has(m.model) &&",
     why: "prunes by provider again, which is how a model the user added under magpie gets eaten",
+  },
+  {
+    file: "seed.mjs",
+    from: "const pruned = shrank && !opts.prune ? [] : droppable.map((m) => m.id)",
+    to: "const pruned = droppable.map((m) => m.id)",
+    why: "a catalog that is short for a moment empties the picker without --prune",
+  },
+  {
+    file: "seed.mjs",
+    from: "m.id !== selected && m.model !== selected && m.displayName !== selected",
+    to: "true",
+    why: "prunes the model Cowork is on right now, which falls back silently",
+  },
+  {
+    file: "seed.mjs",
+    from: "if (!m || !seeded.has(m.id) || m.displayName === m.model) return m",
+    to: "return m",
+    why: "leaves a pretty label as the picker title, so the string magpie writes matches nothing",
+  },
+  {
+    file: "seed.mjs",
+    from: "if (!m || !seeded.has(m.id) || m.displayName === m.model) return m",
+    to: "if (!m || m.displayName === m.model) return m",
+    why: "renames entries the user named, dangling their saved selection",
   },
   {
     file: "seed.mjs",
@@ -56,12 +80,6 @@ const MUTATIONS = [
     from: "return existsSync(storePath) && !existsSync(bakPath)",
     to: "return existsSync(storePath)",
     why: "a second run overwrites the original store with an already-seeded one",
-  },
-  {
-    file: "seed.mjs",
-    from: "if (!oursToLabel(m, ids, byId, baseUrl) || m.displayName === m.model) return m",
-    to: "return m",
-    why: "leaves a pretty label as the picker title, so the string magpie writes matches nothing",
   },
   {
     file: "seed.mjs",
